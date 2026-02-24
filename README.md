@@ -14,6 +14,7 @@ Each row can be shown or hidden independently, and only enabled rows are rendere
 
 The order in which the rows appear is fully configurable for movies and TV shows individually. Rows that are disabled or removed from the configured order are completely removed from the UI. The injected rows fully match the appearance and behavior of Jellyfin’s native DetailsGroupItems. Font weight, underline handling, hover effects, and interaction behavior are adjusted so the additional metadata integrates seamlessly and is visually indistinguishable from the original entries. External links are resolved automatically by parsing the available provider IDs, ensuring that each row opens the correct destination (IMDb Awards, IMDB Locations, TMDb Awards, or IMDB Box Office Mojo) depending on media type and context.
 
+<img src="Screenshot.png" width="600">
 ---
 
 ## Installation
