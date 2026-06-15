@@ -1,3 +1,5 @@
+Note: This script is compatible with [Jellyfin DetailsGroupItems Sets](https://github.com/chrissix666/Jellyfin-DetailsGroupItems-Sets).
+
 # Jellyfin DetailsGroupItems Extension
 
 For **Jellyfin Web**, works with **JavaScript Injector**, requires **OMDb API key** (free key 1000 requests per day).
