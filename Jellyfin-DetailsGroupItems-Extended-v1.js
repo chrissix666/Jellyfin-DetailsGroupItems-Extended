@@ -252,73 +252,320 @@
     if (rowKey === "boxoffice") return modeKey === "movie" && !!modeSettings.enableBoxOffice;
     return false;
   }
-  async function run() {
-    const itemId = getItemIdFromUrl();
-    if (!itemId) return;
-    for (let i = 0; i < 40; i++) {
-      if (findDetailsBox()) break;
-      await sleep(150);
-    }
-    const box = findDetailsBox();
+  const STATE = {
+    currentItemId: "",
+    currentItem: null,
+    currentOmdb: null,
+    currentModeKey: "",
+    currentRowsSignature: "",
+    currentExpectedRows: null,
+    itemPromises: new Map(),
+    omdbPromises: new Map(),
+    runToken: 0,
+    lastScanAt: 0
+  };
+
+  function isVisible(el) {
+    if (!el || !el.isConnected) return false;
+    const rect = el.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  }
+
+  function findDetailsBoxes() {
+    return Array.from(document.querySelectorAll(".itemDetailsGroup")).filter(isVisible);
+  }
+
+  function findBestDetailsBox() {
+    const boxes = findDetailsBoxes();
+    if (!boxes.length) return null;
+    return boxes[boxes.length - 1];
+  }
+
+  function removeAllOmdbRows(box) {
     if (!box) return;
-    const item = await fetchItem(itemId);
+    box.querySelectorAll('[data-omdb-row]').forEach((row) => row.remove());
+  }
+
+  function removeOmdbRowsFromAllBoxes() {
+    for (const box of findDetailsBoxes()) removeAllOmdbRows(box);
+  }
+
+  async function fetchItemCachedStable(itemId) {
+    if (!itemId) return null;
+    const key = String(itemId);
+    if (STATE.currentItemId === key && STATE.currentItem) return STATE.currentItem;
+    if (STATE.itemPromises.has(key)) return STATE.itemPromises.get(key);
+    const promise = fetchItem(key).finally(() => STATE.itemPromises.delete(key));
+    STATE.itemPromises.set(key, promise);
+    return promise;
+  }
+
+  async function fetchOmdbStable(imdbId) {
+    if (!imdbId) return null;
+    const key = String(imdbId);
+    if (STATE.omdbPromises.has(key)) return STATE.omdbPromises.get(key);
+    const promise = fetchOmdb(key).finally(() => STATE.omdbPromises.delete(key));
+    STATE.omdbPromises.set(key, promise);
+    return promise;
+  }
+
+  function buildExpectedRows(modeKey, modeSettings, order, omdb, ids) {
+    const orderSet = new Set(order);
+    const clickable = !!modeSettings.enableClickableLink;
+    const rows = {};
+
+    if (isRowEnabled(modeKey, modeSettings, orderSet, "country")) {
+      const value = normalizeValue(omdb.Country);
+      if (value) {
+        rows.country = {
+          key: "country",
+          label: "Country",
+          value,
+          href: buildLinkUrl("country", ids, modeKey, modeSettings),
+          clickable
+        };
+      }
+    }
+
+    if (isRowEnabled(modeKey, modeSettings, orderSet, "awards")) {
+      const value = normalizeValue(omdb.Awards);
+      if (value) {
+        rows.awards = {
+          key: "awards",
+          label: "Awards",
+          value,
+          href: buildLinkUrl("awards", ids, modeKey, modeSettings),
+          clickable
+        };
+      }
+    }
+
+    if (isRowEnabled(modeKey, modeSettings, orderSet, "boxoffice")) {
+      const value = normalizeValue(omdb.BoxOffice);
+      if (value) {
+        rows.boxoffice = {
+          key: "boxoffice",
+          label: "Box Office",
+          value,
+          href: buildLinkUrl("boxoffice", ids, modeKey, modeSettings),
+          clickable
+        };
+      }
+    }
+
+    return rows;
+  }
+
+  function makeRowsSignature(rows, order) {
+    return order
+      .map((key) => {
+        const row = rows[key];
+        if (!row) return "";
+        return `${row.key}:${row.label}:${row.value}:${row.href || ""}:${row.clickable ? "1" : "0"}`;
+      })
+      .filter(Boolean)
+      .join("|");
+  }
+
+  function hasCorrectOmdbRows(box) {
+    if (!box || !STATE.currentItemId) return false;
+
+    const rows = STATE.currentExpectedRows || {};
+    const order = STATE.currentOrder || [];
+    const expectedKeys = order.filter((key) => rows[key]);
+
+    for (const key of expectedKeys) {
+      const row = box.querySelector(`[data-omdb-row="${key}"]`);
+      if (!row) return false;
+      if (row.dataset.omdbForItemId !== String(STATE.currentItemId)) return false;
+      if (row.dataset.omdbSignature !== String(STATE.currentRowsSignature)) return false;
+      const link = row.querySelector(".content a");
+      if (!link || normalizeValue(link.textContent) !== rows[key].value) return false;
+    }
+
+    const existing = Array.from(box.querySelectorAll('[data-omdb-row]'));
+    for (const row of existing) {
+      const key = row.dataset.omdbRow;
+      if (!expectedKeys.includes(key)) return false;
+    }
+
+    return true;
+  }
+
+  function markOmdbRows(box) {
+    if (!box) return;
+    box.querySelectorAll('[data-omdb-row]').forEach((row) => {
+      row.dataset.omdbForItemId = String(STATE.currentItemId || "");
+      row.dataset.omdbSignature = String(STATE.currentRowsSignature || "");
+    });
+  }
+
+  async function prepareStateForCurrentRoute() {
+    const itemId = getItemIdFromUrl();
+
+    if (!itemId) {
+      STATE.currentItemId = "";
+      STATE.currentItem = null;
+      STATE.currentOmdb = null;
+      STATE.currentModeKey = "";
+      STATE.currentRowsSignature = "";
+      STATE.currentExpectedRows = null;
+      STATE.currentOrder = [];
+      return false;
+    }
+
+    if (STATE.currentItemId !== itemId) {
+      STATE.currentItemId = itemId;
+      STATE.currentItem = null;
+      STATE.currentOmdb = null;
+      STATE.currentModeKey = "";
+      STATE.currentRowsSignature = "";
+      STATE.currentExpectedRows = null;
+      STATE.currentOrder = [];
+    }
+
+    const item = await fetchItemCachedStable(itemId);
+    if (STATE.currentItemId !== itemId) return false;
+
+    if (!item) return false;
+    STATE.currentItem = item;
+
     const imdbId = getProviderId(item, "imdb");
-    if (!imdbId) return;
+    if (!imdbId) {
+      removeOmdbRowsFromAllBoxes();
+      STATE.currentExpectedRows = {};
+      STATE.currentRowsSignature = "";
+      STATE.currentOrder = [];
+      return false;
+    }
+
     const tmdbId = getProviderId(item, "tmdb");
-    const omdb = await fetchOmdb(imdbId);
-    if (!omdb) return;
+    const omdb = await fetchOmdbStable(imdbId);
+    if (STATE.currentItemId !== itemId) return false;
+    if (!omdb) return false;
+
     const modeKey = modeFromOmdbType(omdb.Type);
-    if (!modeKey) return;
+    if (!modeKey) {
+      removeOmdbRowsFromAllBoxes();
+      STATE.currentExpectedRows = {};
+      STATE.currentRowsSignature = "";
+      STATE.currentOrder = [];
+      return false;
+    }
+
     const modeSettings = getModeSettings(modeKey);
     const order = normalizeRowOrderForMode(modeKey, modeSettings.rowOrder);
-    const orderSet = new Set(order);
     const ids = { imdbId, tmdbId };
-    const rows = {};
-    const clickable = !!modeSettings.enableClickableLink;
-    if (isRowEnabled(modeKey, modeSettings, orderSet, "country")) {
-      rows.country = upsertRow(
-        box,
-        "country",
-        "Country",
-        omdb.Country,
-        buildLinkUrl("country", ids, modeKey, modeSettings),
-        clickable
-      );
-    } else {
-      removeRow(box, "country");
-    }
-    if (isRowEnabled(modeKey, modeSettings, orderSet, "awards")) {
-      rows.awards = upsertRow(
-        box,
-        "awards",
-        "Awards",
-        omdb.Awards,
-        buildLinkUrl("awards", ids, modeKey, modeSettings),
-        clickable
-      );
-    } else {
-      removeRow(box, "awards");
-    }
-    if (isRowEnabled(modeKey, modeSettings, orderSet, "boxoffice")) {
-      rows.boxoffice = upsertRow(
-        box,
-        "boxoffice",
-        "Box Office",
-        omdb.BoxOffice,
-        buildLinkUrl("boxoffice", ids, modeKey, modeSettings),
-        clickable
-      );
-    } else {
-      removeRow(box, "boxoffice");
-    }
-    appendInOrder(box, rows, order);
+    const rows = buildExpectedRows(modeKey, modeSettings, order, omdb, ids);
+
+    STATE.currentOmdb = omdb;
+    STATE.currentModeKey = modeKey;
+    STATE.currentOrder = order;
+    STATE.currentExpectedRows = rows;
+    STATE.currentRowsSignature = makeRowsSignature(rows, order);
+
+    return true;
   }
-  let lastUrl = location.href;
-  new MutationObserver(() => {
-    if (location.href !== lastUrl) {
-      lastUrl = location.href;
-      setTimeout(run, 300);
+
+  function applyCurrentOmdbRowsToDom() {
+    const box = findBestDetailsBox();
+    if (!box) return false;
+
+    const rows = STATE.currentExpectedRows || {};
+    const order = STATE.currentOrder || [];
+
+    if (!STATE.currentItemId) {
+      removeAllOmdbRows(box);
+      return false;
     }
-  }).observe(document.body, { childList: true, subtree: true });
-  run();
+
+    if (!STATE.currentRowsSignature) {
+      removeAllOmdbRows(box);
+      return true;
+    }
+
+    if (hasCorrectOmdbRows(box)) return true;
+
+    for (const key of ["country", "awards", "boxoffice"]) {
+      if (!rows[key]) removeRow(box, key);
+    }
+
+    const inserted = {};
+    for (const key of order) {
+      const row = rows[key];
+      if (!row) continue;
+      inserted[key] = upsertRow(box, row.key, row.label, row.value, row.href, row.clickable);
+    }
+
+    appendInOrder(box, inserted, order);
+    markOmdbRows(box);
+    return true;
+  }
+
+  async function scanAndReconcile() {
+    const token = ++STATE.runToken;
+    const ready = await prepareStateForCurrentRoute();
+    if (token !== STATE.runToken) return;
+    if (!ready) return;
+    applyCurrentOmdbRowsToDom();
+  }
+
+  function scheduleScan(delay = 100) {
+    clearTimeout(scheduleScan._t);
+    scheduleScan._t = setTimeout(scanAndReconcile, delay);
+  }
+
+  function bootScanBurst() {
+    scheduleScan(50);
+    setTimeout(scanAndReconcile, 250);
+    setTimeout(scanAndReconcile, 700);
+    setTimeout(scanAndReconcile, 1500);
+    setTimeout(scanAndReconcile, 3000);
+    setTimeout(scanAndReconcile, 5000);
+  }
+
+  let lastRouteKey = "";
+
+  function getRouteKey() {
+    return getItemIdFromUrl() || "";
+  }
+
+  new MutationObserver(() => {
+    const routeKey = getRouteKey();
+
+    if (routeKey !== lastRouteKey) {
+      lastRouteKey = routeKey;
+      bootScanBurst();
+      return;
+    }
+
+    const now = Date.now();
+    if (now - STATE.lastScanAt > 250) {
+      STATE.lastScanAt = now;
+      scheduleScan(150);
+    }
+  }).observe(document.body, {
+    childList: true,
+    subtree: true
+  });
+
+  setInterval(() => {
+    const routeKey = getRouteKey();
+
+    if (routeKey !== lastRouteKey) {
+      lastRouteKey = routeKey;
+      bootScanBurst();
+      return;
+    }
+
+    if (!applyCurrentOmdbRowsToDom()) {
+      scanAndReconcile();
+    }
+  }, 750);
+
+  window.addEventListener("hashchange", bootScanBurst);
+  window.addEventListener("popstate", bootScanBurst);
+
+  lastRouteKey = getRouteKey();
+  bootScanBurst();
 })();
