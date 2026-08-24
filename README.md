@@ -1,3 +1,7 @@
+[Jellyfin Projects](https://linktr.ee/JellyfinProjects) | [Kodi Projects](https://linktr.ee/KodiProjects)
+
+---
+
 Note: This script is compatible with [Jellyfin DetailsGroupItems Sets](https://github.com/chrissix666/Jellyfin-DetailsGroupItems-Sets).
 
 # Jellyfin DetailsGroupItems Extension
