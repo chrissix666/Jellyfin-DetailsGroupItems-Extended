@@ -69,7 +69,9 @@
     if (!token) return null;
     const res = await fetch(
       `${getBaseUrl()}/Items/${itemId}?Fields=ProviderIds`,
-      { headers: { "X-Emby-Token": token } }
+      // Authorization header: Jellyfin 12.x ignores X-Emby-Token unless legacy
+      // authorization is switched on; this form works in 10.10.x and 12.x.
+      { headers: { Authorization: `MediaBrowser Token="${token}"` } }
     );
     if (!res.ok) return null;
     return res.json();
@@ -185,6 +187,16 @@
       a.dataset.hoverUnderlineBound = "true";
     }
   }
+  // Line height of Jellyfin's own row labels in this box: a plain div in
+  // 10.10.x (same value as ours, so nothing changes there), an MUI
+  // Typography <p> with a taller line in 12.x; without it our rows would sit
+  // 2px lower than the native ones.
+  function matchNativeLabel(box, label) {
+    const native = box && box.querySelector(
+      ".detailsGroupItem:not([data-omdb-row]):not([data-collection-row]) .label"
+    );
+    if (native) label.style.lineHeight = getComputedStyle(native).lineHeight;
+  }
   function getOrCreateRow(box, key, labelText, href, clickable) {
     const selector = `[data-omdb-row="${key}"]`;
     let row = box.querySelector(selector);
@@ -195,6 +207,7 @@
     const label = document.createElement("div");
     label.className = "label";
     label.textContent = labelText;
+    matchNativeLabel(box, label);
     const content = document.createElement("div");
     content.className = "content focuscontainer-x";
     const link = document.createElement("a");
