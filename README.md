@@ -39,7 +39,7 @@ boxoffice → Box Office Mojo page (boxofficemojo.com/title/{imdbId})
 
 - Windows 11  
 - Chrome  
-- Jellyfin Web 10.10.7 
+- Jellyfin Web 10.10.7 and 12.0+ 
 
 ---
 
