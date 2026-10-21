@@ -222,6 +222,8 @@
       a.style.textDecoration = "none";
       return;
     }
+    a.setAttribute("target", "_blank");
+    a.setAttribute("rel", "noopener noreferrer");
     a.style.pointerEvents = "auto";
     a.style.fontWeight = "600";
     a.style.color = "inherit";
@@ -275,6 +277,11 @@
     const content = document.createElement("div");
     content.className = "content focuscontainer-x";
     const link = document.createElement("a");
+    // Jellyfin's own link button: in apps without target=_blank support
+    // (Android) its click handler opens the URL in the system browser via
+    // shell.openUrl instead of inside the app (elements/emby-button/
+    // emby-button.js:12-27 in 10.10.7, :15-30 in 12.0/12.1).
+    link.setAttribute("is", "emby-linkbutton");
     link.className = "button-link emby-button";
     if (clickable && href) {
       link.setAttribute("href", href);
